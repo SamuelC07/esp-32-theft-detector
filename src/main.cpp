@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <SPI.h>
+#include <SD.h>
 
 const int MPU_addr = 0x68; // I2C address of the MPU-6500
 const int ON_BUTTON_PIN = 18;
@@ -10,6 +12,11 @@ const int ON_LED_PIN = 2; // pin that shows recording data
 const int PRIMED_LED_PIN = 4; // device is primed to record in stolen mode
 const int STOLEN_LED_PIN = 23; // device is in stolen recording mode
 
+const int MICRO_SD_MISO = 19;
+const int MICRO_SD_MOSI = 13;
+const int MICRO_SD_SCK = 26;
+const int MICRO_SD_CS = 14;
+
 bool isOn = false;
 bool isStolen = false;
 bool isPrimed = false;
@@ -18,7 +25,26 @@ unsigned long snatchStartTime = 0;
 
 int16_t AcX,AcY,AcZ,Tmp,GyX,GyY,GyZ;
 
+String dataBuffer = "";
+int count = 0;
+const int BATCH_SIZE = 50;
+
+void writeBufferToSD() {
+  if (dataBuffer.length() == 0) {
+    return; // nothing to write
+  }
+  File f = SD.open("/data.csv", FILE_WRITE);
+  if (f) {
+    f.print(dataBuffer);
+    f.close();
+  }
+}
+
 void setup() {
+  // time to stabilize
+  delay(1000);
+
+
   Wire.begin(21, 22);
   Wire.beginTransmission(MPU_addr);
   Wire.write(0x6B); // PWR_MGMT_1 register
@@ -26,8 +52,30 @@ void setup() {
   Wire.endTransmission(true);
   Serial.begin(115200);
 
+  SPI.begin(MICRO_SD_SCK, MICRO_SD_MISO, MICRO_SD_MOSI, MICRO_SD_CS); // use non default pins
+
+
+  // initialize SD card
+  if (!SD.begin(MICRO_SD_CS)) {
+    Serial.println("Can't initialize SD Card");
+  }
+  else {
+    Serial.println("SD Card Initialized");
+
+    File f = SD.open("/data.txt", FILE_WRITE);
+    if (f) {
+      f.println("Hello, SD");
+      f.close();
+    }
+    else {
+      Serial.println("failed to open text file");
+    }
+  }
+
+
   pinMode(ON_BUTTON_PIN, INPUT_PULLUP);
   pinMode(OFF_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(STOLEN_BUTTON_PIN, INPUT_PULLUP);
 
   pinMode(ON_LED_PIN, OUTPUT);
   pinMode(PRIMED_LED_PIN, OUTPUT);
@@ -41,9 +89,11 @@ void loop() {
     digitalWrite(ON_LED_PIN, HIGH);
     isOn = true;
   }
-  if (digitalRead(OFF_BUTTON_PIN) == LOW) {
+  if (digitalRead(OFF_BUTTON_PIN) == LOW && isOn) {
     digitalWrite(ON_LED_PIN, LOW);
     isOn = false;
+    writeBufferToSD();
+    count = 0;
   }
 
 
@@ -92,11 +142,27 @@ void loop() {
   GyZ=Wire.read()<<8|Wire.read(); // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L)
 
 
-  //print
-  if (isStolen) {
-    Serial.printf(">X:%d\n>Y:%d\n>Z:%d\nSTOLEN!\n", AcX, AcY, AcZ);
-  } else {
-    Serial.printf(">X:%d\n>Y:%d\n>Z:%d\n\n", AcX, AcY, AcZ);
+  // // print
+  // if (isStolen) {
+  //   Serial.printf(">X:%d\n>Y:%d\n>Z:%d\nSTOLEN!\n", AcX, AcY, AcZ);
+  // } else {
+  //   Serial.printf(">X:%d\n>Y:%d\n>Z:%d\n\n", AcX, AcY, AcZ);
+  // }
+
+  // add the numbers to the buffer. if a the buffer has 50 frames, write to the file
+  dataBuffer += String(AcX) + "," +
+                String(AcY) + "," +
+                String(AcZ) + "," +
+                String(GyX) + "," +
+                String(GyY) + "," +
+                String(GyZ) + "," +
+                String(isStolen ? 1 : 0) + "\n";
+
+  count++;
+
+  if (count >= BATCH_SIZE) {
+    writeBufferToSD();
+    count = 0;
   }
 }
 
