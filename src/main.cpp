@@ -27,19 +27,20 @@ int16_t AcX,AcY,AcZ,Tmp,GyX,GyY,GyZ;
 
 String dataBuffer = "";
 int count = 0;
-const int BATCH_SIZE = 50;
+const int BATCH_SIZE = 250;
 
 void writeBufferToSD() {
   if (dataBuffer.length() == 0) {
     return; // nothing to write
   }
-  File f = SD.open("/data.csv", FILE_WRITE);
+  File f = SD.open("/data.csv", FILE_APPEND);
   if (f) {
     f.print(dataBuffer);
     f.close();
   }
+  dataBuffer = "";
 }
-
+  
 void setup() {
   // time to stabilize
   delay(1000);
@@ -62,14 +63,14 @@ void setup() {
   else {
     Serial.println("SD Card Initialized");
 
-    File f = SD.open("/data.txt", FILE_WRITE);
-    if (f) {
-      f.println("Hello, SD");
-      f.close();
-    }
-    else {
-      Serial.println("failed to open text file");
-    }
+    // File f = SD.open("/data.txt", FILE_APPEND);
+    // if (f) {
+    //   f.println("Hello, SD");
+    //   f.close();
+    // }
+    // else {
+    //   Serial.println("failed to open text file");
+    // }
   }
 
 
@@ -115,6 +116,8 @@ void loop() {
     // turn on stolen LED
     digitalWrite(STOLEN_LED_PIN, HIGH);
 
+    Serial.println("Stolen!");
+
     snatchStartTime = millis();
   }
 
@@ -131,7 +134,7 @@ void loop() {
   Wire.beginTransmission(MPU_addr);
   Wire.write(0x3B);
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU_addr, 14, true);
+  Wire.requestFrom(MPU_addr, 14, true);         
 
   AcX=Wire.read()<<8|Wire.read(); // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)
   AcY=Wire.read()<<8|Wire.read(); // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
