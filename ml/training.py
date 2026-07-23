@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 import pandas as pd
 import numpy as np
 
@@ -29,83 +29,118 @@ class MotionDataSet(Dataset):
             self.window_labels.append(window_label)
 
         self.windows = np.array(self.windows, dtype=np.float32)
-        self.labels = np.array(self.window_labels, dtype=np.long)
+        self.labels = np.array(self.window_labels, dtype=np.int64)
     
     def __len__(self):
         return len(self.labels)
     
     def __getitem__(self, index):
         return (
-            torch.tensor(self.windows[index], dtype=torch.float32), 
-            torch.tensor(self.labels[index], dtype=torch.int64)
+            torch.from_numpy(self.windows[index]), 
+            torch.tensor(self.labels[index], dtype=torch.long)
         )
         
         
 data = pd.read_csv('data.csv', header=None)
 dataset = MotionDataSet(data)
-print(dataset.__getitem__(10))
 
-data_loader = DataLoader(dataset, batch_size=32, shuffle=True)
+# split dataset into training and validation split
+train_size = int(0.8 * len(dataset))
+val_size = len(dataset) - train_size
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
+# parameters of MLP
+input_size = 300
+output_size = 2
+hidden_size = 100
+learning_rate = 0.1
+epochs = 40
 
+# making the MLP
+W1 = torch.randn(input_size, hidden_size) * 0.01
+b1 = torch.zeros(hidden_size)
+W2 = torch.randn(hidden_size, output_size) * 0.01
+b2 = torch.randn(output_size)
+parameters = [W1, b1, W2, b2]
+for p in parameters:
+    p.requires_grad_(True)
 
-
-
-
-
-
-
-
-
-# input_size = 4
-# output_size = 2
-# hidden_size = 100
-
-# W1 = torch.randn(input_size, hidden_size)
-# b1 = torch.randn(hidden_size)
-# W2 = torch.randn(hidden_size, output_size)
-# b2 = torch.randn(output_size)
-# parameters = [W1, b1, W2, b2]
-# for p in parameters:
-#     p.requires_grad_(True)
-
-# Xs = torch.tensor(
-#     [[1, 1, 1, 1],
-#     [0, 0, 0, 0],
-#     [1, 2, 3, 4],
-#     [5, 5, 5, 5]]
-# ).float()
-# Ys = torch.tensor([0, 1, 1, 0])
-
-# for _ in range(100):
+# training
+for _ in range(epochs):
+    running_loss = 0.0
+    total_samples = 0
     
-#     # forward pass
-#     h = torch.tanh(Xs @ W1 + b1)
-#     logits = h @ W2 + b2
-#     loss = F.cross_entropy(logits, Ys)
-#     print(loss.item())
-    
-#     # backwards pass
-#     for p in parameters:
-#         p.grad = None
-#     loss.backward()
-    
-#     # update
-#     for p in parameters:
-#         p.data += -0.1 * p.grad
-    
+    for batch_windows, batch_labels in train_loader:
+        
+        # flatten to vector of size 300 (window size * 6)
+        Xb = batch_windows.view(batch_windows.size(0), -1)
+        Yb = batch_labels
 
-
-# # test
-# test_input = torch.tensor([1, 2, 3, 4]).float()
-# h = torch.tanh(test_input @ W1 + b1)
-# logits = h @ W2 + b2
-
-# probs = F.softmax(logits, dim=0)
-# print(probs)
-# pred = torch.argmax(logits)
-# print(pred.item())
+        # forward pass
+        h = torch.tanh(Xb @ W1 + b1)
+        logits = h @ W2 + b2
+        loss = F.cross_entropy(logits, Yb)
+        # print(loss.item())
+        
+        # backwards pass
+        for p in parameters:
+            p.grad = None
+        loss.backward()
+        
+        # update
+        for p in parameters:
+            p.data += -learning_rate * p.grad
+            
+        # track loss in epochs
+        running_loss += loss.item() * len(Yb)
+        total_samples += len(Yb)
     
+    # val dataset check
+    val_loss = 0.0
+    with torch.no_grad():
+        for batch_windows, batch_labels in val_loader:
+            Xb = batch_windows.view(batch_windows.size(0), -1)
+            Yb = batch_labels
+            h = torch.tanh(Xb @ W1 + b1)
+            logits = h @ W2 + b2
+            loss = F.cross_entropy(logits, Yb)
+            val_loss += loss.item() * len(Yb)
     
-    
+    # print loss
+    epoch_loss = running_loss / total_samples
+    epoch_val_loss = val_loss / len(val_dataset)
+    print("training loss:", epoch_loss)
+    print("validation loss", epoch_val_loss)
 
+# simulating error rate
+correct = 0
+# track false positives and negatives
+false_positives = 0
+false_negatives = 0
+
+with torch.no_grad():
+    for batch_windows, batch_labels in val_loader:
+        Xb = batch_windows.view(batch_windows.size(0), -1)
+        Yb = batch_labels
+        
+        h = torch.tanh(Xb @ W1 + b1)
+        logits = h @ W2 + b2
+        
+        preds = torch.argmax(logits, dim=1)
+        correct += (preds == Yb).sum().item()
+        false_positives += ((preds == 1) & (Yb == 0)).sum().item()
+        false_negatives += ((preds == 0) & (Yb == 1)).sum().item()
+
+total_val = len(val_dataset)
+val_accuracy = (correct / total_val) * 100
+val_error = 100.0 - val_accuracy
+
+# print report
+print("Total validation samples:", total_val)
+print("Percentage correct:", val_accuracy)
+print("Error Rate:", val_error)
+print("Correct Predictions:", correct)
+print("False Positives:", false_positives)
+print("False Negatives:", false_negatives)
