@@ -44,11 +44,13 @@ class MotionDataSet(Dataset):
 data = pd.read_csv('data.csv', header=None)
 dataset = MotionDataSet(data)
 
+g = torch.Generator().manual_seed(2147483647)
+
 # split dataset into training and validation split
 train_size = int(0.8 * len(dataset))
 val_size = len(dataset) - train_size
-train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size], generator=g)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, generator=g)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
 # parameters of MLP
@@ -56,19 +58,20 @@ input_size = 300
 output_size = 2
 hidden_size = 100
 learning_rate = 0.1
-epochs = 40
+second_learning_rate = 0.05
+epochs = 60
 
 # making the MLP
-W1 = torch.randn(input_size, hidden_size) * 0.01
+W1 = torch.randn((input_size, hidden_size), generator=g) * 0.01
 b1 = torch.zeros(hidden_size)
-W2 = torch.randn(hidden_size, output_size) * 0.01
-b2 = torch.randn(output_size)
+W2 = torch.randn((hidden_size, output_size), generator=g) * 0.01
+b2 = torch.zeros(output_size)
 parameters = [W1, b1, W2, b2]
 for p in parameters:
     p.requires_grad_(True)
 
 # training
-for _ in range(epochs):
+for epoch in range(epochs):
     running_loss = 0.0
     total_samples = 0
     
@@ -91,8 +94,7 @@ for _ in range(epochs):
         
         # update
         for p in parameters:
-            p.data += -learning_rate * p.grad
-            
+            p.data += (-learning_rate if epoch < epochs / 2 else -second_learning_rate) * p.grad
         # track loss in epochs
         running_loss += loss.item() * len(Yb)
         total_samples += len(Yb)
@@ -144,3 +146,27 @@ print("Error Rate:", val_error)
 print("Correct Predictions:", correct)
 print("False Positives:", false_positives)
 print("False Negatives:", false_negatives)
+
+# write parameter to a c++ .h file
+
+w1_array = W1.detach().cpu().numpy().flatten()
+b1_array = b1.detach().cpu().numpy().flatten()
+w2_array = W2.detach().cpu().numpy().flatten()
+b2_array = b2.detach().cpu().numpy().flatten()
+
+with open("src/params.h", "w") as f:
+    f.write("#pragma once\n\n")
+    
+    f.write(f"#define INPUT_SIZE {input_size}\n")
+    f.write(f"#define HIDDEN_SIZE {hidden_size}\n")
+    f.write(f"#define OUTPUT_SIZE {output_size}\n\n")
+    
+    def write_array(name, arr):
+        f.write(f"const float {name}[{len(arr)}] = {{\n ")
+        vals_formatted = [f"{v:.8f}f" for v in arr]
+        f.write(", ".join(vals_formatted))
+        f.write("\n};\n\n")
+    write_array("W1", w1_array)
+    write_array("b1", b1_array)
+    write_array("W2", w2_array)
+    write_array("b2", b2_array)
