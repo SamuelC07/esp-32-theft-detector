@@ -1,4 +1,4 @@
-**Esp-32 ML Theft Detector**
+### Esp-32 ML Theft Detector
 
 An embedded real-time theft detector running on an ESP-32 microcontroller. The device reads a 6-axis IMU over I2C and runs inference locally through a handwritten C++ forward pass.
 
